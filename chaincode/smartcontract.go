@@ -35,6 +35,14 @@ const (
 	NotWorking
 )
 
+type ClaimApproved int
+
+const (
+	Approved ClaimApproved = iota
+	Rejected
+	NA
+)
+
 type Date struct {
 	Day   int `json:"day"`
 	Month int `json:"month"`
@@ -52,6 +60,7 @@ type Policy struct {
 	InsuredTo              string            `json:"insuredTo"`
 	InsuredAt              Date              `json:"insuredAt"`
 	NumberOfPremiumsPaid   int               `json:"numberOfPremiumsPaid"`
+	ClaimApproved          ClaimApproved     `json:"claimApproved"`
 }
 
 // CreatePolicy creates a new policy on a new item on the ledger
@@ -93,6 +102,7 @@ func (s *SmartContract) CreatePolicy(ctx contractapi.TransactionContextInterface
 		InsuredTo:              creatorOrg,
 		InsuredAt:              date,
 		NumberOfPremiumsPaid:   1,
+		ClaimApproved:          NA,
 	}
 
 	policyJSON, err := json.Marshal(policy)
@@ -119,6 +129,33 @@ func (s *SmartContract) ReadPolicy(ctx contractapi.TransactionContextInterface, 
 		return nil, err
 	}
 	return &policy, nil
+}
+
+// GetAllPolicies lists all existing policy details
+func (s *SmartContract) GetAllPolicies(ctx contractapi.TransactionContextInterface) ([]*Policy, error) {
+	// range query with empty string for startKey and endKey does an
+	// open-ended query of all assets in the chaincode namespace.
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, err
+	}
+	defer resultsIterator.Close()
+
+	var policies []*Policy
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		var policy Policy
+		err = json.Unmarshal(queryResponse.Value, &policy)
+		if err != nil {
+			return nil, err
+		}
+		policies = append(policies, &policy)
+	}
+	return policies, nil
 }
 
 // PayPremium pays the premium for the policy at each month
@@ -154,7 +191,7 @@ func (s *SmartContract) ClaimPolicy(ctx contractapi.TransactionContextInterface,
 		return fmt.Errorf("you did not pay all the premiums of policy: %s", id)
 	}
 
-	if policy.InsuredItemStatus != NotWorking{
+	if policy.InsuredItemStatus != NotWorking {
 		return fmt.Errorf("you can only claim insurance if item is not working")
 	}
 
@@ -168,7 +205,30 @@ func (s *SmartContract) ClaimPolicy(ctx contractapi.TransactionContextInterface,
 		return fmt.Errorf("failed to marshal policy: %v", err)
 	}
 
-	//TODO: implement transfer of claimed amount to client
+	return ctx.GetStub().PutState(policy.ID, policyJSON)
+}
+
+// ApprovePolicy approves the claim and transfers amount to client
+func (s *SmartContract) ApprovePolicy(ctx contractapi.TransactionContextInterface, id string) error {
+	//TODO: implement logic that prevents anyone except the insuring organization to approve the claim
+	policy, err := s.ReadPolicy(ctx, id)
+	if err != nil {
+		return err
+	}
+	if policy.ClaimStatus != Claimed {
+		return fmt.Errorf("you can only approve a claimed policy")
+	}
+	if policy.ClaimApproved == Approved {
+		return fmt.Errorf("you have already approved the claim")
+	}
+	//TODO: implement business logic check before approval
+
+	// update policy to be approved
+	policy.ClaimApproved = Approved
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal policy: %v", err)
+	}
 	return ctx.GetStub().PutState(policy.ID, policyJSON)
 }
 

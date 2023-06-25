@@ -17,8 +17,8 @@
 # Dependency directories (remove the comment below to include it)
 vendor/
 
-# images
-*.png
+# drawio
+*.drawio
 
 # Go workspace file
 go.work
